@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pico 2 W 藍牙控制面板</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: #1e1e1e;
+            color: #ffffff;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 50px;
+        }
+        h1 { color: #4db8ff; }
+        .controls {
+            margin: 20px 0;
+            display: flex;
+            gap: 15px;
+        }
+        button {
+            padding: 12px 24px;
+            font-size: 16px;
+            font-weight: bold;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        button:disabled {
+            background-color: #555;
+            color: #888;
+            cursor: not-allowed;
+        }
+        #btnConnect { background-color: #0078d4; color: white; }
+        #btnConnect:hover:not(:disabled) { background-color: #005a9e; }
+        #btnOn { background-color: #28a745; color: white; }
+        #btnOn:hover:not(:disabled) { background-color: #218838; }
+        #btnOff { background-color: #dc3545; color: white; }
+        #btnOff:hover:not(:disabled) { background-color: #c82333; }
+        
+        #console {
+            width: 100%;
+            max-width: 500px;
+            height: 300px;
+            background-color: #000;
+            border: 2px solid #333;
+            border-radius: 8px;
+            padding: 15px;
+            overflow-y: auto;
+            font-family: 'Courier New', Courier, monospace;
+            box-sizing: border-box;
+        }
+        .log-entry { margin: 5px 0; border-bottom: 1px dashed #333; padding-bottom: 5px;}
+        .log-time { color: #888; font-size: 12px; margin-right: 10px; }
+    </style>
+</head>
+<body>
+
+    <h1>Pico 2 W 藍牙控制面板</h1>
+    
+    <div class="controls">
+        <button id="btnConnect">1. 連接藍牙序列埠</button>
+        <button id="btnOn" disabled>2. 開啟 LED (發送 '1')</button>
+        <button id="btnOff" disabled>3. 關閉 LED (發送 '0')</button>
+    </div>
+
+    <div id="console"></div>
+
+    <script>
+        let port;
+        let writer;
+        let reader;
+        let keepReading = true;
+
+        const btnConnect = document.getElementById('btnConnect');
+        const btnOn = document.getElementById('btnOn');
+        const btnOff = document.getElementById('btnOff');
+        const consoleDiv = document.getElementById('console');
+
+        // 在畫面上印出訊息
+        function logToConsole(message, color = "#fff") {
+            const time = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.className = 'log-entry';
+            entry.style.color = color;
+            entry.innerHTML = `<span class="log-time">[${time}]</span> ${message}`;
+            consoleDiv.appendChild(entry);
+            consoleDiv.scrollTop = consoleDiv.scrollHeight; // 自動捲動到底部
+        }
+
+        // 連接序列埠
+        btnConnect.addEventListener('click', async () => {
+            try {
+                // 請求使用者選擇序列埠 (Web Serial API)
+                port = await navigator.serial.requestPort();
+                
+                // 開啟序列埠
+                await port.open({ baudRate: 115200 });
+                
+                // ★ 修正 1：強制發送 DTR/RTS 訊號，打通 Windows 藍牙傳輸通道 ★
+                await port.setSignals({ dataTerminalReady: true, requestToSend: true });
+                
+                logToConsole("藍牙序列埠連接成功！通道已喚醒。", "#28a745");
+                
+                btnConnect.disabled = true;
+                btnOn.disabled = false;
+                btnOff.disabled = false;
+
+                // 準備寫入器
+                const textEncoder = new TextEncoderStream();
+                const writableStreamClosed = textEncoder.readable.pipeTo(port.writable);
+                writer = textEncoder.writable.getWriter();
+
+                // 啟動讀取迴圈
+                readLoop();
+
+            } catch (err) {
+                logToConsole(`連接失敗或取消: ${err.message}`, "#dc3545");
+                logToConsole("提示：如果是 Failed to open，請嘗試選擇清單中的另一個 COM Port，或關閉佔用的程式。", "#ffc107");
+            }
+        });
+
+        // 發送資料的函式
+        async function sendData(data) {
+            if (writer) {
+                try {
+                    await writer.write(data);
+                    // 為了畫面美觀，印出日誌時把 \n 濾掉
+                    logToConsole(`已發送指令: ${data.replace('\n', '')}`, "#4db8ff");
+                } catch (err) {
+                    logToConsole(`發送失敗: ${err.message}`, "#dc3545");
+                }
+            }
+        }
+
+        // ★ 修正 2：按鈕事件綁定，加上 \n 換行符號確保指令推播 ★
+        btnOn.addEventListener('click', () => sendData('1\n'));
+        btnOff.addEventListener('click', () => sendData('0\n'));
+
+        // 持續讀取來自 Pico 的資料
+        async function readLoop() {
+            const textDecoder = new TextDecoderStream();
+            const readableStreamClosed = port.readable.pipeTo(textDecoder.writable);
+            reader = textDecoder.readable.getReader();
+
+            let incomingData = "";
+
+            try {
+                while (keepReading) {
+                    const { value, done } = await reader.read();
+                    if (done) {
+                        reader.releaseLock();
+                        break;
+                    }
+                    
+                    // 將接收到的資料累加
+                    incomingData += value;
+                    
+                    // 如果遇到換行符號，表示收到完整的一行資料
+                    if (incomingData.includes('\n')) {
+                        const lines = incomingData.split('\n');
+                        // 處理除了最後一個不完整片段以外的所有行
+                        for (let i = 0; i < lines.length - 1; i++) {
+                            let cleanLine = lines[i].replace('\r', '').trim();
+                            if(cleanLine) {
+                                logToConsole(`接收: ${cleanLine}`, "#ffc107");
+                            }
+                        }
+                        // 保留最後一個可能還沒收到換行符號的片段
+                        incomingData = lines[lines.length - 1];
+                    }
+                }
+            } catch (err) {
+                logToConsole(`讀取資料發生錯誤: ${err.message}`, "#dc3545");
+            } finally {
+                // 清理工作
+                btnConnect.disabled = false;
+                btnOn.disabled = true;
+                btnOff.disabled = true;
+            }
+        }
+    </script>
+</body>
+</html>
