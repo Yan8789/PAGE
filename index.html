@@ -8,6 +8,8 @@
     <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
     <style>
         * {
             margin: 0;
@@ -358,11 +360,14 @@
             
             if (saved) {
                 codeInput.value = saved;
-                try {
-                    renderPreview(saved, savedType);
-                } catch (e) {
-                    // 靜默處理
-                }
+                // 延遲執行以確保 DOM 已準備好
+                setTimeout(() => {
+                    try {
+                        renderPreview(saved, savedType);
+                    } catch (e) {
+                        // 靜默處理
+                    }
+                }, 500);
             }
         }
 
@@ -402,36 +407,59 @@
             } else if (type === 'react') {
                 // React 代碼
                 try {
-                    // 過濾掉 import 語句
-                    const codeWithoutImports = code.replace(/import\s+.*?from\s+['"`].*?['"`];?/g, '');
+                    // 1. 清理 import 語句
+                    let cleanCode = code;
+                    cleanCode = cleanCode.replace(/import\s+{[^}]*}\s+from\s+['"`][^'"`]*['"`];?/g, '');
+                    cleanCode = cleanCode.replace(/import\s+\w+\s+from\s+['"`][^'"`]*['"`];?/g, '');
                     
-                    // 確保有根元素
-                    let finalCode = codeWithoutImports;
-                    if (!finalCode.includes('react-root')) {
-                        const rootDiv = document.createElement('div');
-                        rootDiv.id = 'react-root';
-                        preview.appendChild(rootDiv);
-                    }
+                    // 2. 圖標替換映射
+                    const iconMap = {
+                        'BookOpen': '📖', 'CheckCircle': '✅', 'XCircle': '❌', 'RotateCcw': '🔄',
+                        'ArrowRight': '→', 'ArrowLeft': '←', 'Settings2': '⚙️', 'Keyboard': '⌨️',
+                        'CreditCard': '🎫', 'ListChecks': '📋'
+                    };
+                    
+                    // 3. 創建根元素
+                    const rootDiv = document.createElement('div');
+                    rootDiv.id = 'react-root';
+                    rootDiv.style.width = '100%';
+                    rootDiv.style.height = '100%';
+                    preview.appendChild(rootDiv);
 
-                    // 使用 Babel 轉換 JSX
-                    const transpiledCode = Babel.transform(finalCode, {
+                    // 4. 移除 export 語句
+                    cleanCode = cleanCode.replace(/export\s+default\s+/g, '');
+                    
+                    // 5. Babel 轉譯
+                    const transpiledCode = Babel.transform(cleanCode, {
                         presets: ['react']
                     }).code;
 
-                    // 創建並執行函數，提供 React 和 ReactDOM 到全局作用域
-                    const wrappedCode = `
-                        (function() {
-                            const React = arguments[0];
-                            const ReactDOM = arguments[1];
-                            ${transpiledCode}
-                        })
+                    // 6. 組建完整、可執行的代碼
+                    const fullCode = `
+                    (function() {
+                        const { useState, useEffect, useRef } = React;
+                        ${Object.entries(iconMap).map(([name, emoji]) => 
+                            `const ${name} = (props) => React.createElement('span', {className: props.className, style: props.style || {}, onClick: props.onClick, children: '${emoji}'});`
+                        ).join('\n')}
+                        
+                        ${transpiledCode}
+                        
+                        function renderApp() {
+                            const root = ReactDOM.createRoot(document.getElementById('react-root'));
+                            root.render(React.createElement(App, null));
+                        }
+                        
+                        renderApp();
+                    })();
                     `;
+
+                    // 7. 執行代碼
+                    const script = document.createElement('script');
+                    script.textContent = fullCode;
+                    document.head.appendChild(script);
                     
-                    // 執行代碼
-                    const func = new Function(wrappedCode);
-                    func.call(preview, window.React, window.ReactDOM);
                 } catch (error) {
-                    preview.innerHTML = `<div class="error-display"><strong>React 代碼錯誤:</strong><br><pre>${error.message}</pre><p>💡 提示: 確保代碼中有 <code>ReactDOM.createRoot(document.getElementById('react-root')).render(&lt;App /&gt;)</code></p></div>`;
+                    preview.innerHTML = `<div class="error-display"><strong>❌ React 代碼錯誤:</strong><br><p style="margin: 10px 0; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;">${error.toString()}</p><p style="margin-top: 10px;">💡 提示：確保有 <code style="background: #f0f0f0; padding: 2px 4px;">function App()</code> 或直接導出的組件</p></div>`;
                 }
             }
         }
