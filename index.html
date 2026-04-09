@@ -4,10 +4,6 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>HTML/React 網頁即時預覽</title>
-    <!-- React 和 Babel -->
-    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -300,10 +296,9 @@
             </div>
             <div class="sidebar-content">
                 <div class="code-type-selector">
-                    <button class="active" data-type="html" onclick="setCodeType('html')">HTML</button>
-                    <button data-type="react" onclick="setCodeType('react')">React</button>
+                    <button class="active" data-type="html" onclick="setCodeType('html')">HTML/CSS/JS</button>
                 </div>
-                <textarea id="codeInput" placeholder="請貼上你的 HTML 或 React 代碼..."></textarea>
+                <textarea id="codeInput" placeholder="請貼上你的 HTML 代碼（包含 CSS 和 JavaScript）..."></textarea>
                 <div class="button-group">
                     <button class="btn-publish" onclick="publishCode()">🚀 發布</button>
                     <button class="btn-clear" onclick="clearCode()">🗑️ 清空</button>
@@ -340,9 +335,7 @@
             });
             document.querySelector(`[data-type="${type}"]`).classList.add('active');
             
-            codeInput.placeholder = type === 'html' 
-                ? "請貼上你的 HTML 代碼..." 
-                : "請貼上你的 React 代碼...";
+            codeInput.placeholder = "請貼上你的 HTML 代碼（包含 CSS 和 JavaScript）...";
         }
 
         // 切換側邊欄
@@ -363,7 +356,7 @@
                 // 延遲執行以確保 DOM 已準備好
                 setTimeout(() => {
                     try {
-                        renderPreview(saved, savedType);
+                        renderPreview(saved);
                     } catch (e) {
                         // 靜默處理
                     }
@@ -382,9 +375,9 @@
 
             try {
                 localStorage.setItem(STORAGE_KEY, code);
-                localStorage.setItem(CODE_TYPE_KEY, currentCodeType);
+                localStorage.setItem(CODE_TYPE_KEY, 'html');
                 
-                renderPreview(code, currentCodeType);
+                renderPreview(code);
                 showStatus('✅ 已成功發布！', 'success');
             } catch (error) {
                 showStatus('❌ 發布失敗: ' + error.message, 'error');
@@ -392,75 +385,22 @@
         }
 
         // 渲染預覽
-        function renderPreview(code, type) {
+        function renderPreview(code) {
             preview.innerHTML = '';
             
-            if (type === 'html') {
+            try {
+                // 直接將 HTML 代碼插入預覽區域
                 preview.innerHTML = code;
-                // 執行 script 標籤中的代碼
+                
+                // 執行所有 script 標籤中的代碼
                 const scripts = preview.querySelectorAll('script');
                 scripts.forEach(script => {
                     const newScript = document.createElement('script');
                     newScript.textContent = script.textContent;
                     preview.appendChild(newScript);
                 });
-            } else if (type === 'react') {
-                // React 代碼
-                try {
-                    // 1. 清理 import 語句
-                    let cleanCode = code;
-                    cleanCode = cleanCode.replace(/import\s+{[^}]*}\s+from\s+['"`][^'"`]*['"`];?/g, '');
-                    cleanCode = cleanCode.replace(/import\s+\w+\s+from\s+['"`][^'"`]*['"`];?/g, '');
-                    
-                    // 2. 圖標替換映射
-                    const iconMap = {
-                        'BookOpen': '📖', 'CheckCircle': '✅', 'XCircle': '❌', 'RotateCcw': '🔄',
-                        'ArrowRight': '→', 'ArrowLeft': '←', 'Settings2': '⚙️', 'Keyboard': '⌨️',
-                        'CreditCard': '🎫', 'ListChecks': '📋'
-                    };
-                    
-                    // 3. 創建根元素
-                    const rootDiv = document.createElement('div');
-                    rootDiv.id = 'react-root';
-                    rootDiv.style.width = '100%';
-                    rootDiv.style.height = '100%';
-                    preview.appendChild(rootDiv);
-
-                    // 4. 移除 export 語句
-                    cleanCode = cleanCode.replace(/export\s+default\s+/g, '');
-                    
-                    // 5. Babel 轉譯
-                    const transpiledCode = Babel.transform(cleanCode, {
-                        presets: ['react']
-                    }).code;
-
-                    // 6. 組建完整、可執行的代碼
-                    const fullCode = `
-                    (function() {
-                        const { useState, useEffect, useRef } = React;
-                        ${Object.entries(iconMap).map(([name, emoji]) => 
-                            `const ${name} = (props) => React.createElement('span', {className: props.className, style: props.style || {}, onClick: props.onClick, children: '${emoji}'});`
-                        ).join('\n')}
-                        
-                        ${transpiledCode}
-                        
-                        function renderApp() {
-                            const root = ReactDOM.createRoot(document.getElementById('react-root'));
-                            root.render(React.createElement(App, null));
-                        }
-                        
-                        renderApp();
-                    })();
-                    `;
-
-                    // 7. 執行代碼
-                    const script = document.createElement('script');
-                    script.textContent = fullCode;
-                    document.head.appendChild(script);
-                    
-                } catch (error) {
-                    preview.innerHTML = `<div class="error-display"><strong>❌ React 代碼錯誤:</strong><br><p style="margin: 10px 0; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;">${error.toString()}</p><p style="margin-top: 10px;">💡 提示：確保有 <code style="background: #f0f0f0; padding: 2px 4px;">function App()</code> 或直接導出的組件</p></div>`;
-                }
+            } catch (error) {
+                preview.innerHTML = `<div class="error-display"><strong>❌ 代碼錯誤:</strong><br><p style="margin: 10px 0; font-family: monospace; font-size: 12px; white-space: pre-wrap; word-break: break-all;">${error.toString()}</p></div>`;
             }
         }
 
