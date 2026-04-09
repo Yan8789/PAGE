@@ -25,6 +25,7 @@
         .wrapper {
             display: flex;
             height: 100vh;
+            position: relative;
         }
 
         .sidebar {
@@ -41,6 +42,34 @@
         .sidebar.collapsed {
             width: 0;
             transform: translateX(-400px);
+        }
+
+        .sidebar-toggle-left {
+            position: absolute;
+            left: 0;
+            top: 16px;
+            width: 40px;
+            height: 40px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 0 6px 6px 0;
+            cursor: pointer;
+            font-size: 16px;
+            font-weight: bold;
+            transition: all 0.3s;
+            display: none;
+            z-index: 99;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .sidebar-toggle-left:hover {
+            width: 50px;
+        }
+    
+        .wrapper.sidebar-open .sidebar-toggle-left {
+            display: flex;
         }
 
         .sidebar-header {
@@ -283,6 +312,7 @@
         <!-- 預覽區域 -->
         <div class="preview-container">
             <button class="toggle-sidebar-btn" onclick="toggleSidebar()">☰ 編輯代碼</button>
+            <button class="sidebar-toggle-left" onclick="toggleSidebar()">▶</button>
             <div id="preview">
                 <div class="empty-state">貼上代碼後按「發布」開始預覽</div>
             </div>
@@ -371,21 +401,37 @@
                 });
             } else if (type === 'react') {
                 // React 代碼
-                const rootDiv = document.createElement('div');
-                rootDiv.id = 'react-root';
-                preview.appendChild(rootDiv);
-
                 try {
+                    // 過濾掉 import 語句
+                    const codeWithoutImports = code.replace(/import\s+.*?from\s+['"`].*?['"`];?/g, '');
+                    
+                    // 確保有根元素
+                    let finalCode = codeWithoutImports;
+                    if (!finalCode.includes('react-root')) {
+                        const rootDiv = document.createElement('div');
+                        rootDiv.id = 'react-root';
+                        preview.appendChild(rootDiv);
+                    }
+
                     // 使用 Babel 轉換 JSX
-                    const transpiledCode = Babel.transform(code, {
+                    const transpiledCode = Babel.transform(finalCode, {
                         presets: ['react']
                     }).code;
 
-                    // 創建一個函數並執行
-                    const func = new Function('React', 'ReactDOM', transpiledCode);
-                    func(window.React, window.ReactDOM);
+                    // 創建並執行函數，提供 React 和 ReactDOM 到全局作用域
+                    const wrappedCode = `
+                        (function() {
+                            const React = arguments[0];
+                            const ReactDOM = arguments[1];
+                            ${transpiledCode}
+                        })
+                    `;
+                    
+                    // 執行代碼
+                    const func = new Function(wrappedCode);
+                    func.call(preview, window.React, window.ReactDOM);
                 } catch (error) {
-                    preview.innerHTML = `<div class="error-display"><strong>React 代碼錯誤:</strong><br>${error.message}</div>`;
+                    preview.innerHTML = `<div class="error-display"><strong>React 代碼錯誤:</strong><br><pre>${error.message}</pre><p>💡 提示: 確保代碼中有 <code>ReactDOM.createRoot(document.getElementById('react-root')).render(&lt;App /&gt;)</code></p></div>`;
                 }
             }
         }
